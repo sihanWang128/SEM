@@ -1,0 +1,283 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, include=FALSE}
+### DATA MANIPULATION ###
+library("haven")        
+library("dplyr")      
+library("psych")
+library('stringr')
+
+### MODELING ###
+library("lavaan")       
+
+### VISUALIZATION ###
+library("corrplot")     
+library("tidySEM")
+
+```
+
+# Data exploration
+
+```{r}
+ess_df <- haven::read_sav("https://github.com/albertostefanelli/SEM_labs/raw/master/data/ESS4_belgium.sav")
+ess=ess_df%>%select(
+  ## Welfare support items ##
+                  gvslvol, # the old
+                  gvslvue, # the unemployed
+                  gvhlthc, # the sick
+                  gvcldcr, # working parents
+                  gvjbevn, # job for everyone
+                  gvpdlwk, # paid sick leave  
+                  ##    Economic criticism items ##
+                  sbstrec, # strain on economy
+                  sbbsntx, # too much taxes
+                  ##    Social criticism items ## 
+                  sbprvpv, # poverty
+                  sbeqsoc, # more equal society
+                  sbcwkfm, # work and family
+                  ##    Moral criticism items ##
+                  sblazy,  # people lazy 
+                  sblwcoa, # care for others
+                  sblwlka  # look after others
+)
+descriptive_ess <-as.data.frame(psych::describe(ess))
+
+descriptive_ess <- dplyr::select(descriptive_ess, 
+  n,mean,sd,median,min,max,skew,kurtosis)
+descriptive_ess
+```
+
+# Welfare group
+
+```{r}
+ess_welfare=ess_df%>%select(
+   ## Welfare support items ##
+                  gvslvol, # the old
+                  gvslvue, # the unemployed
+                  gvhlthc, # the sick
+                  gvcldcr, # working parents
+                  gvjbevn, # job for everyone
+                  gvpdlwk  # paid sick leave  
+)
+welfare_cov=cov(ess_welfare, use="pairwise.complete.obs")
+welfare_cov
+
+welfare_cor=cov2cor(welfare_cov)
+welfare_cor
+
+corrplot::corrplot(welfare_cor, is.corr=F, method="circle", type="upper", addCoef.col="black")
+```
+
+# 1 factor CFA model ( 3 indicators )
+
+## Sorts of identification:
+
+non-identified: df<0, impossible to estimate parameters 
+
+over-identified: df>0, we should strive for this
+
+just-identified: df=0, it is ok, but the fit cannot be assessed
+
+empirical under-identification: it can happen when two or more indicators are highly correlated (multicollinearity)
+
+## Degrees of freedom = Number of parameters to estimate - Pieces of information
+## Pieces of information = p(p+1)2=3(3+1)2=6.
+
+where p is the number of “manifest” indicators i (also called “measured variables” or “observed indicators”), in this case gvslvol gvslvue, gvhlthc.
+
+## Number of parameters to estimate = ψf+λji+θi=1+2+3=6
+where ψf is the latent factor f variance, λfi is the loading on the latent factor f for each observed indicator i, and θi is the residual variance for each observed indicator i.
+
+## Degrees of freedom = Number of parameters to estimate - Pieces of informations =6−6=0
+
+# CFA model
+```{r}
+model1='wel_supp =~ gvslvol + gvslvue + gvhlthc'
+fit.model1=cfa(model1, data=ess)
+summary(fit.model1)
+
+#fix one factor loading to 1
+#fix factor variance to 1, freely estimate the first factor loadings
+#fix the average loading to 1
+model2='welf_supp =~ NA*gvslvol + gvslvue + gvhlthc
+welf_supp~~1*welf_supp'
+fit.model2=cfa(model2, data=ess)
+```
+
+## different between these 2 models
+
+1. variances of wel_supp changes
+2. the latent variables have different loadings
+
+# 1 factor model with 6 indicators
+```{r}
+model3 <-'welf_supp =~ gvslvol + gvslvue + gvhlthc + gvcldcr + gvjbevn + gvpdlwk'
+
+
+fit.model3 <- cfa(model3,# modelformula
+                data = ess) # data frame 
+```
+
+## why does the degree of freedom changes from 6 to 9?
+
+# Model Diagnostics
+
+1.Estimates
+Do the indicators load well on the factor(s)?
+
+2.Model fit
+Are the fit indices good?
+
+3.Heywood cases/ reasonable solution
+Are variances positive?
+Are r2 is below 1?
+Are there any extreme standard errors?
+
+```{r}
+# observed covariance matrix
+lavInspect(fit.model3, "sampstat")
+
+# estimated covariance matrix
+fitted(fit.model3)
+
+# difference between the observed and estimated covariance matrix
+residuals(fit.model3)
+
+# standard errors for the free parameters in the model3
+lavTech(fit.model3, "se")
+
+# fit statistics for model3
+fitMeasures(fit.model3)
+
+# modification indices
+modificationIndices(fit.model3)
+
+# parameters estimates with confidence intervals
+parameterEstimates(fit.model3, standardized=TRUE)
+
+# using fitted model3, return commonly used fit measures, and indicates the standardized result
+summary(fit.model3, fit.measures=T, standardized=T)
+
+# extract the standrardized factor loading
+inspect(fit.model3, what='std')$lambda
+
+#more info on factor loading, extract all the estimated parameters
+tidy_results <- table_results(fit_ws_6,             
+  columns = c("label", "est_sig", "se", "confint"),
+  digits = 2)
+
+tidy_results %>% filter(str_detect(label,"welf_supp."))
+
+#residual variances (theta)
+theta <- round(inspect(fit.model3, "est")$theta,3)
+theta.std <- round(inspect(fit.model3, "std")$theta,3) 
+r2 <- round(inspect(fit.model3, "r2"),3)
+
+data.frame(row.names = c(),# empty the columns names
+           Variables = colnames(theta), # variable names 
+           "Residuals" = diag(theta),# diagonal theta
+           "Std. Residuals" = diag(theta.std),# diagonal std. theta
+           "R Squared" = r2) # R-squared
+```
+# Model fit statistics
+
+Global fit measures:
+1.They take into account how the entire entire model fit the data
+
+2.(some) rules of thumb: CFI/TLI>0.95,RMSEA<0.05,SRMR<0.06
+
+current practice is: chi-square value + df + pvalue, RMSEA, CFI and SRMR
+
+we can modify the model based on a review of:
+MI’s in combination with EPC’s (Expected Value Change). Both need to be “substantial”
+
+Theory or the source of the data
+
+```{r}
+#global fit measures
+fitMeasures(fit.model3, c("logl","AIC", "BIC", "chisq", "df", "pvalue", "cfi", "tli","rmsea"), output = "matrix")
+
+#modification indices
+mi <- inspect(fit.model3,"mi")
+mi.sorted <- mi[order(-mi$mi),] # sort from high to low mi.sorted[1:5,] # only display some large MI values
+mi.sorted[1:5,] # only display some large MI values
+
+#plot modification indices
+plot(mi.sorted$mi)
+abline(h=3.84) #add horizontal reference line (chi-square value for 1 df and p=0.05)
+```
+
+# 3-factor CFA model
+
+```{r}
+ess_df_selected <- ess_df %>% select(
+                  ## Economic criticism items ##
+                  sbstrec, # strain on economy
+                  sbbsntx, # too much taxes
+                  ##    Social criticism items ## 
+                  sbprvpv, # poverty
+                  sbeqsoc, # more equal society
+                  sbcwkfm, # work and family
+                  ##    Moral criticism items ##
+                  sblazy,  # people lazy 
+                  sblwcoa, # care for others
+                  sblwlka  # look after others
+)
+
+welfare_crit_cov <- cov(ess_df_selected, use = "pairwise.complete.obs")
+
+welfare_crit_cor <- cov2cor(welfare_crit_cov)
+
+corrplot::corrplot(welfare_crit_cor, 
+                   is.corr = FALSE,       # whether is a correlation matrix 
+                   method = "circle",     # magnitude of covariance as circles 
+                   type = "upper",        # remove the bottom of the covariance matrix
+                   addCoef.col = "black"  # add to the plot the coefficients
+          )
+
+#build the model
+model_wc <-'
+## Economic criticism ##
+wc_econo =~ sbstrec + sbbsntx
+## Social criticism ## 
+wc_socia =~ sbprvpv + sbeqsoc + sbcwkfm
+##  Moral criticism ##
+wc_moral =~ sblazy + sblwcoa + sblwlka
+'
+
+fit_wc <- cfa(model_wc,              # model formula
+             data = ess_df_selected  # data frame
+  )
+summary(fit_wc, standardized=TRUE)
+
+# plot the sem model
+lay <- get_layout("wc_econo", "", "", "wc_socia","", "","wc_moral", "",
+                  "sbstrec", "sbbsntx", "sbprvpv", "sbeqsoc", "sbcwkfm", "sblazy", "sblwcoa", "sblwlka", rows = 2)
+
+#method 1 to plot
+plot_wc <- graph_sem(model = fit_wc,      # model fit
+                    layout = lay,         # layout 
+                    angle = 170           # adjust the arrows 
+                    #label = "est_std",  # get standardized results (not rounded)
+          )   
+plot_wc
+
+
+# method 2 to plot, For instance, it is possible to highlighting a specific model element, such as the low factor loading for sbcwkfm on wc_socia
+graph_data <- prepare_graph(fit_wc)
+ 
+edges(graph_data) <- graph_data %>% 
+  edges() %>%
+  mutate(colour = "black") %>%
+  mutate(colour = replace(colour, from == "wc_socia" & to == "sbcwkfm", "red"))
+
+plot(graph_data,
+     layout = lay,        # layout 
+     #label = "est_std",   # get standardized results (not rounded)
+     angle = 170          # adjust the arrows 
+  )
+```
+
