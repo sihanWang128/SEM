@@ -1,0 +1,494 @@
+---
+title: "SEM_paper"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+# importing packages
+library("haven")        
+library("dplyr")      
+library("psych")
+library('stringr')
+library("lavaan")   
+library("tidySEM")
+library("purrr") 
+library(ggplot2)
+library("corrplot")
+library("semTools")
+library(MVN)
+library(Amelia)
+```
+
+# data importing
+```{r}
+data_2017=read.csv('../ESS7e02_2.csv')
+
+belgium_2017 <- data_2017 %>% filter(cntry=="BE") %>% select(imbgeco, imueclt, imwbcnt, imtcjob, imbleco,imwbcrm,qfimedu, qfimlng, qfimchr,qfimwht, qfimwsk,qfimcmt,stflife, stfeco, stfgov, stfedu, stfdem,agea, gndr, eduyrs, hinctnta)
+
+
+write.csv(belgium_2017, "ESS7_belgium2017.csv")
+```
+
+# description of data
+```{r}
+ess=read.csv("ESS7_belgium2017.csv", row.names = 1)
+es.std=scale(ess)
+
+descriptive_ess= as.data.frame(describe(ess))
+descriptive_ess
+```
+
+# Correlation and covariance table of variables
+```{r}
+# correlation graph for welfare support government responsibility variables
+ess.imm=ess%>%select(imbgeco, imueclt, imwbcnt, imtcjob, imbleco,imwbcrm)
+imm.cov<- cov(ess.imm, use = "pairwise.complete.obs")
+imm.cor <- cov2cor(imm.cov)
+corrplot::corrplot(imm.cor, 
+                   is.corr = FALSE, 
+                   method = "circle", 
+                   type = "upper" )
+
+# correlation graph for welfare support criticism variables
+ess.condition=ess%>%select(qfimedu, qfimlng, qfimchr,qfimwht, qfimwsk,qfimcmt)
+condition.cov<- cov(ess.condition, use = "pairwise.complete.obs")
+condition.cor <- cov2cor(condition.cov)
+corrplot::corrplot(condition.cor, 
+                   is.corr = FALSE, 
+                   method = "circle", 
+                   type = "upper" )
+
+# correlation graph for satisfaction variables
+ess_df.satif=ess_df%>%select(stflife, stfeco, stfgov, stfedu, stfhlth)
+welfare.satif.cov<- cov(ess_df.satif, use = "pairwise.complete.obs")
+welfare.satif.cor <- cov2cor(welfare.satif.cov)
+corrplot::corrplot(welfare.satif.cor, 
+                   is.corr = FALSE, 
+                   method = "circle", 
+                   type = "upper" )
+
+# overall correlation graph
+cov <- cov(ess, use = "pairwise.complete.obs")
+cor <- cov2cor(cov)
+corrplot::corrplot(cor, 
+                   is.corr = FALSE,
+                   method = "circle", 
+                   type = "upper"   )
+
+```
+
+# detecting normality of data
+1. using KS(Kolmogorov_Smirnov) test, if D is more close to 0 then the data is more normally distributed. 
+
+2. using Henze-Zirkler's multivariate normality test, if p-value < 0.05 then non-normality
+```{r}
+#checking if the univariate is normal, if the univariate distribution is non-normality then multivariate distribution is not normal.
+
+# qualification of immigration histogram
+# not normally distributed
+edu=ggplot(ess, aes(qfimedu))+geom_histogram(aes(y=..density..), binwidth=1, color='black', alpha=0.3)
+
+work=ggplot(ess, aes(qfimwsk))+geom_histogram(aes(y=..density..), binwidth=1, color='black', alpha=0.3)
+
+# social satisfaction scores histogram
+life=ggplot(ess, aes(stflife))+geom_histogram(aes(y=..density..), binwidth=1, color='black', alpha=0.3)
+
+econ=ggplot(ess, aes(stfeco))+geom_histogram(aes(y=..density..), binwidth=1, color='black', alpha=0.3)
+
+
+#KS test to check the normality
+ks_life=ks.test(ess$stflife, 'pnorm', mean=mean(ess$stflife, na.rm=T), sd=sd(ess$stflife, na.rm=T))
+ks_life
+# D=0.21458, p-value close to zero
+
+ks_edu=ks.test(ess$qfimedu, 'pnorm', mean=mean(ess$qfimedu, na.rm=T), sd=sd(ess$qfimedu, na.rm=T))
+ks_edu
+# D=0.21708, p-value close to zero
+
+ks_econ=ks.test(ess$imbgeco, 'pnorm', mean=mean(ess$imbgeco, na.rm=T), sd=sd(ess$imbgeco, na.rm=T))
+ks_econ
+# D=0.29409, p-value close to zero
+
+data.frame(Variables= c("life_satisfaction", "education_qualification", "social_economy"),
+          D = round(c(ks_life$statistic, ks_edu$statistic, ks_econ$statistic),2),
+          "P-value" = c(ks_life$p.value, ks_edu$p.value, ks_econ$p.value))
+
+# HZ test
+ess_ws <- ess[,c("stflife", "qfimedu", "imbgeco")]
+ess_ws_na <- na.omit(ess_ws)
+mvn <- mvn(data = ess_ws_na,mvnTest = c("hz"))
+mvn$multivariateNormality
+# the result shows a non-multivariate normality, with HZ value=130.285, p-value close to zero. 
+
+# checking missing values
+ess_wc <- ess%>% select(imbgeco, imueclt, imwbcnt, imtcjob, imbleco,imwbcrm,qfimedu, qfimlng, qfimchr,qfimwht, qfimwsk,qfimcmt,stflife, stfeco, stfgov, stfedu, stfdem)
+# Amelia explicitly requires a object of data.frame class 
+ess_wc <- data.frame(ess_wc)
+
+a.out <- amelia(ess_wc, m = 15,seed = 23 )
+# the output result shows there is no missing value in the dataset. 
+```
+
+
+
+# other CFA model (exercise 3)
+1. test equal loadings (metirc invariance)
+2. test eqaal loadings and intercepts (scalar invariance)
+3. test equal loadings, intercepts, and residuals (strict invariance)
+4. test factor variance and covariance (structural invariance)
+5. evaluating measurement invariance, check which model is better
+6. then checking modification indices, and free one parameter at a time "parTable(fit_strict)" can check which parameter need to be freed.
+7. then run cfa again to compare the results
+
+
+# model fit stats
+1. CFI, TLI, RMSEA, SRMR
+2. checking modification indices
+
+# CFA configural model 
+
+```{r}
+model1  <-'
+    # political impact of immigration
+    impact=~imbgeco+imueclt+imwbcnt+imtcjob+imbleco+imwbcrm
+    # immigration qualification
+    eligibility=~ qfimedu+qfimlng+qfimchr+qfimwht+qfimwsk+qfimcmt
+    #social _satisfaction
+    satisfaction =~ stflife+ stfeco+ stfgov+ stfedu+ stfdem
+
+    impact~~1*impact
+    eligibility~~1*eligibility
+    satisfaction~~1*satisfaction
+    impact~~eligibility
+    impact~~satisfaction
+    eligibility~~satisfaction
+'
+fit.model=cfa(model1, data = ess, estimator="ML")
+fit.model.rob<- cfa(model1, data = ess, estimator="MLM")
+summary(fit.model.rob,  fit.measures=T)
+summary(fit.model, fit.measures=T)
+#fitMeasures(fit.model.rob, c('chisq','df', 'pvalue', 'cfi',  'tli', 'rmsea', 'srmr'))
+#fitMeasures(fit.model, c('chisq','df', 'pvalue', 'cfi',  'tli', 'rmsea', 'srmr'))
+
+#plot the sem
+lay <- get_layout("impact", "", "", "","","",
+                  "eligibility","", "","", "","",
+                  "satisfaction", "","", "", "",
+                  "imbgeco","imueclt","imwbcnt","imtcjob","imbleco", "imwbcrm",
+ "qfimedu", "qfimlng", "qfimchr", "qfimwht","qfimwsk","qfimcmt",
+ "stflife", "stfeco", "stfgov", "stfedu","stfdem",rows = 2)
+
+plot_wc <- graph_sem(model = fit.model.rob,   
+                    layout = lay,  
+                    angle = 180,text_size = 1.5 )   
+
+plot_wc
+modificationIndices(fit.model.rob,standardized=TRUE)
+
+#imbgeco	~~	stfdem	36.846
+#imtcjob	~~	qfimlng	54.028
+#qfimchr	~~	stflife	38.636
+
+# chi-square test has p-value=0 which indicate the model is lack of fit 
+# but the chi-square test will be impacted by the sample size,
+# from the CFI, TLI in standard result, they are lower than 0.90 which means lack of fit. the CFI and TLI improved in the robust result, although it still an indicator of lack of fit.
+# the RMSEA and SRMR in the robust model meet the criteria of goodness of fit. 
+# in this case we have a mix evidence of evaluating the overall , and compare to the standard model, robust model is better.
+
+# next we see the factor loading, the first factor loading is assigned to 1 to scale each latent variable. 
+# then the p-value shows the significance of factor loading, we can see most of the variables are significant except qfimchr. we would consider about removing this variables from the model and check the goodness of fit. 
+# std.all is the correlation value
+
+# since eligibility~~satisfaction does not have significant relationship, we remove the relationship from the model to test the goodness of fit. 
+
+
+```
+
+# remove qfimchr from eligibility
+```{r}
+model2  <-'
+    # political impact of immigration
+    impact=~imbgeco+imueclt+imwbcnt+imtcjob+imbleco+imwbcrm
+    # immigration qualification, remove qfimchr
+    eligibility=~ qfimedu+qfimlng+qfimwht+qfimwsk+qfimcmt
+    #social _satisfaction
+    satisfaction =~ stflife+ stfeco+ stfgov+ stfedu+ stfdem
+
+    impact~~1*impact
+    eligibility~~1*eligibility
+    satisfaction~~1*satisfaction
+    impact~~eligibility
+    impact~~satisfaction
+    #eligibility~~satisfaction
+'
+#imbgeco	~~	stfdem	36.846
+#imtcjob	~~	qfimlng	54.028
+#qfimchr	~~	stflife	38.636
+fit.model2<- cfa(model2, data = ess, estimator='MLM')
+summary(fit.model2, standardized=TRUE, fit.measures=T)
+fitMeasures(fit.model2, c('chisq','df', 'pvalue', 'cfi',  'tli', 'rmsea', 'srmr'))
+modificationIndices(fit.model2,standardized=TRUE)
+lay <- get_layout("impact", "", "", "","","",
+                  "eligibility","", "","", "","",
+                  "satisfaction", "","", "", "",
+                  "imbgeco","imueclt","imwbcnt","imtcjob","imbleco", "imwbcrm",
+ "qfimedu", "qfimlng", "qfimchr", "qfimwht","qfimwsk","qfimcmt",
+ "stflife", "stfeco", "stfgov", "stfedu","stfdem",rows = 2)
+
+plot_m2 <- graph_sem(model = fit.model2,   
+                    layout = lay,  
+                    angle = 180,text_size = 1.5 ) 
+plot_m2
+
+ 
+```
+
+```{r}
+# model 3, base on the modification measurements, add some relationship between predictors
+model3  <-'
+    # political impact of immigration
+    impact=~imbgeco+imueclt+imwbcnt+imtcjob+imbleco+imwbcrm
+    # immigration qualification, remove qfimchr
+    eligibility=~ qfimedu+qfimlng+qfimwht+qfimwsk+qfimcmt
+    #social _satisfaction
+    satisfaction =~ stflife+ stfeco+ stfgov+ stfedu+ stfdem
+
+    impact~~1*impact
+    eligibility~~1*eligibility
+    satisfaction~~1*satisfaction
+    impact~~eligibility
+    impact~~satisfaction
+    eligibility~~satisfaction
+    
+    imtcjob	~~	qfimlng
+'
+fit.model3<- cfa(model3, data = ess, estimator='MLM')
+summary(fit.model3, standardized=TRUE, fit.measures=T)
+
+# in model 3 we add the relationship between imtcjob and qfimlng. from the covariances result, the significant p-value states the latent variables impact and eligibility has a negative relationship. However, the two predictors from the latent variables do not have any relationship, since the p-value=0.260 which greater than 0.05. Thus it is not necessary to add the relationship into the model. Also we can see that model3 does not improve a large amount compared to model2, then we will use model2 in further MIMC analysis.  
+
+
+```
+
+```{r}
+# observed covaraince matrix
+lavInspect(fit.model2, "sampstat")
+
+# estimated covariance matrix
+fitted(fit.model2)
+
+# difference between the observed and estimated covariance matrix
+residuals(fit.model2)
+
+# standard errors for free parameters in the model
+lavTech(fit.model2, "se")
+
+# parameter estimates with confidence interval
+parameterEstimates(fit.model2, standardized=TRUE)
+
+```
+
+
+
+# MIMC model (multiple indicators, multiple causes), Ex2
+1. which variable in agea,eduyrs,gndr,hinctnta have effect on government and social variable. 
+
+```{r}
+# model.mimic is based on model2, without 2 variables in wc
+# all additional effects on ws
+model2.mimic  <-'
+    # political impact of immigration
+    impact=~imbgeco+imueclt+imwbcnt+imtcjob+imbleco+imwbcrm
+    # immigration qualification, remove qfimchr
+    eligibility=~ qfimedu+qfimlng+qfimwht+qfimwsk+qfimcmt
+    #social _satisfaction
+    satisfaction =~ stflife+ stfeco+ stfgov+ stfedu+ stfdem
+
+    impact~~1*impact
+    eligibility~~1*eligibility
+    satisfaction~~1*satisfaction
+    impact~~eligibility
+    impact~~satisfaction
+    eligibility~~satisfaction
+    
+    impact~ agea+eduyrs+gndr+hinctnta
+    eligibility~ agea+eduyrs+gndr+hinctnta
+    satisfaction~ agea+eduyrs+gndr+hinctnta
+'
+
+fit2.mimic=cfa(model2.mimic, data=ess, estimator='MLM')
+summary(fit2.mimic, standardized=TRUE, fit.measures=T)
+#fitMeasures(fit.mimic, c('chisq','df', 'pvalue', 'cfi',  'tli', 'rmsea', 'srmr'))
+
+model2.mimic2  <-'
+    # political impact of immigration
+    impact=~imbgeco+imueclt+imwbcnt+imtcjob+imbleco+imwbcrm
+    # immigration qualification, remove qfimchr
+    eligibility=~ qfimedu+qfimlng+qfimwht+qfimwsk+qfimcmt
+    #social _satisfaction
+    satisfaction =~ stflife+ stfeco+ stfgov+ stfedu+ stfdem
+
+    impact~~1*impact
+    eligibility~~1*eligibility
+    satisfaction~~1*satisfaction
+    impact~~eligibility
+    impact~~satisfaction
+    eligibility~~satisfaction
+    
+    impact~ eduyrs
+    eligibility~ agea+eduyrs
+    satisfaction~ hinctnta
+'
+
+fit2.mimic2=cfa(model2.mimic2, data=ess, estimator='MLM')
+summary(fit2.mimic2, standardized=TRUE, fit.measures=T)
+# only education years will affect the impact of immigration
+# age and education years will affect the qualification of immigration
+# household income will affect the satisfaction of public
+
+lay <- get_layout( "qfimedu", "qfimlng",  "qfimwht","qfimwsk","qfimcmt","","","",
+                   "","agea","eligibility","","","eduyrs","","","",
+                   "","","","", "impact","","","","",
+                   "","","","","imbgeco","imueclt","imwbcnt","imtcjob","imbleco","imwbcrm",
+                   "", "satisfaction","", "hinctnta","", "", "","", "", 
+ "stflife", "stfeco", "stfgov", "stfedu","stfdem","","","","",rows = 6)
+lay
+
+graph_sem(model = fit2.mimic2,   
+                    layout = lay,  
+                    text_size = 1.5 ) 
+```
+
+# configural, metric, strong test
+```{r}
+cfa.config <- cfa(model2.mimic2, data = ess,estimator="MLM",  group="gndr")
+summary(cfa.config, fit.measures = TRUE, standardized = TRUE)
+
+# Metric model
+cfa.metric <- cfa(model2.mimic2,data = ess, estimator="MLM",group = "gndr", group.equal = "loadings")
+summary(cfa.metric, fit.measures = TRUE, standardized = TRUE)
+
+# Model comparison
+anova(cfa.config, cfa.metric)
+#This finding suggests that after constraining the factor loadings to be equal across groups, the model fit did change substantially.
+
+# Scalar model
+cfa.scalar <- cfa(model2.mimic2, data = ess, group = "gndr",estimator="MLM", group.equal = c("loadings","intercepts"))
+summary(cfa.scalar, fit.measures = TRUE, standardized = TRUE)
+# Model comparison
+anova(cfa.metric, cfa.scalar)
+#This finding suggests that after constraining the factor loadings and intercept to be equal across groups, the model fit did not change substantially. 
+# metirc model is better than other 2
+
+rbind(config=fitMeasures(cfa.config, c('chisq','df', 'pvalue', 'cfi',  'tli', 'rmsea', 'srmr')),
+metric=fitMeasures(cfa.metric, c('chisq','df', 'pvalue', 'cfi',  'tli', 'rmsea', 'srmr')),
+scalar=fitMeasures(cfa.scalar, c('chisq','df', 'pvalue', 'cfi',  'tli', 'rmsea', 'srmr')))
+
+# from the result we can see that the goodness of fit for 3 models deviate from the perfect model. Comparing the fit measurements, CFI and TLI of metric model and scalar model decrease as we put equal loading and intercept constrains. But the RMSEA and SRMR meet the fit criteria (above 0.95) after adding equal loading constrain, equal intercept condition does not make any changes to improve the model.  
+
+# need to use other model to test
+```
+
+# mediation analysis Ex2
+1. direct and indirect effect of variables
+
+```{r}
+# without socio features impact
+model2.med='
+    # political impact of immigration
+    impact=~imbgeco+imueclt+imwbcnt+imtcjob+imbleco+imwbcrm
+    # immigration qualification, remove qfimchr
+    eligibility=~ qfimedu+qfimlng+qfimchr+qfimwht+qfimwsk+qfimcmt
+    #social_satisfaction
+    satisfaction=~stflife+ stfeco+ stfgov+ stfedu+ stfdem
+
+    impact~~1*impact
+    eligibility~~1*eligibility
+    satisfaction~~1*satisfaction
+    impact~~eligibility
+    impact~~satisfaction
+
+    # direct effect
+    satisfaction ~ a*impact
+    
+    # mediator
+    eligibility ~ b*impact
+    satisfaction ~ c*eligibility
+
+    #indirect effect
+    indirect:=b*c
+    
+    # total effect
+    total:=a+(b*c)
+'
+fit.med=cfa(model2.med, data=ess, estimator='MLM',orthogonal = TRUE)
+summary(fit.med,standardized=TRUE, fit.measures=T)
+lay <- get_layout( "qfimedu", "qfimlng",  "qfimwht","qfimwsk","qfimcmt","","","",
+                   "","","eligibility","","","","","","",
+                   "","","","", "impact","","","","",
+                   "","","","","imbgeco","imueclt","imwbcnt","imtcjob","imbleco","imwbcrm",
+                   "", "satisfaction","", "","", "", "","", "", 
+ "stflife", "stfeco", "stfgov", "stfedu","stfdem","","","","",rows = 6)
+lay
+graph_sem(model = fit.med,   
+                    layout = lay,  
+                    text_size = 1.5 ) 
+
+
+```
+
+
+```{r}
+model2.mimic.med  <-'
+    # political impact of immigration
+    impact=~imbgeco+imueclt+imwbcnt+imtcjob+imbleco+imwbcrm
+    # immigration qualification, remove qfimchr
+    eligibility=~ qfimedu+qfimlng+qfimwht+qfimwsk+qfimcmt
+    #social _satisfaction
+    satisfaction =~ stflife+ stfeco+ stfgov+ stfedu+ stfdem
+
+    impact~~1*impact
+    eligibility~~1*eligibility
+    satisfaction~~1*satisfaction
+    impact~~eligibility
+    impact~~satisfaction
+    
+    impact~ eduyrs 
+    eligibility~ agea+eduyrs
+    satisfaction~ hinctnta
+    
+    # direct effect
+    satisfaction ~ a*impact
+    
+    # mediator
+    eligibility ~ b*impact
+    satisfaction ~ c*eligibility
+
+    #indirect effect
+    indirect:=b*c
+    
+    # total effect
+    total:=a+(b*c)
+'
+fit.mimic.med=cfa(model2.mimic.med, data=ess, estimator="MLM")
+summary(fit.mimic.med,standardized=TRUE, fit.measures=T)
+lay <- get_layout( "qfimedu", "qfimlng",  "qfimwht","qfimwsk","qfimcmt","","","",
+                   "","agea","eligibility","","","eduyrs","","","",
+                   "","","","", "impact","","","","",
+                   "","","","","imbgeco","imueclt","imwbcnt","imtcjob","imbleco","imwbcrm",
+                   "", "satisfaction","", "hinctnta","", "", "","", "", 
+ "stflife", "stfeco", "stfgov", "stfedu","stfdem","","","","",rows = 6)
+lay
+
+graph_sem(model = fit.mimic.med,   
+                    layout = lay,  
+                    text_size = 1.5 ) 
+```
+
+
+
+
+# multi-group SEM EX3
+The goal of such an analysis is to assess whether the relationships among predictor and response variables vary by group
+
+1. compare the difference of models with unconstrained and constrained loadings 
