@@ -1,0 +1,252 @@
+---
+title: "SEM_lab2"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+### DATA MANIPULATION ###
+library("haven")        
+library("dplyr")      
+library("psych")
+library('stringr')
+
+### MODELING ###
+library("lavaan")       
+
+### VISUALIZATION ###
+library("tidySEM")
+ess_df <- haven::read_sav("https://github.com/albertostefanelli/SEM_labs/raw/master/data/ESS4e04_5.sav")
+ess_df
+```
+
+# EX1
+
+```{r}
+# 1.Fit the a measurement model with both welfare support and egalitarianism and review the fit statistics. Also review the parameter estimates. How close are they to the population values?
+model_ws_eg <- '
+## Welfare Support Factor ##
+welf_supp =~ gvslvol+gvslvue+gvhlthc
+
+## Egalitarianism ##
+egual =~ gincdif+dfincac+smdfslv 
+'
+
+fit_ws_eg <- cfa(model_ws_eg, # model formula
+                 data=ess_df)  # data frame
+summary(fit_ws_eg)
+```
+
+1.there are 13 parameters, and total obs is 1760. 
+
+2.from the test stats: chi-square is 40.125 with 8 degree of freedom, and p-value is very significant. 
+
+3. from the latent variables: gvslvue is lower than others, and dfincac has negative lambda value. 
+
+4. covariance of welf_supp and egual is negative (-0.225)
+
+
+
+
+```{r}
+# 2.Predict welfare support by adding the gender covariate and assess the changes in fit statistics and parameter estimates.
+model_ws_eg1 <- '
+## Welfare Support Factor ##
+welf_supp =~ gvslvol+gvslvue+gvhlthc
+welf_supp ~ gndr
+
+## Egalitarianism ##
+egual =~ gincdif+dfincac+smdfslv 
+'
+
+fit_ws_eg1 <- cfa(model_ws_eg1, # model formula
+                 data=ess_df)  # data frame
+
+summary(fit_ws_eg1)
+```
+
+```{r}
+model_ws_eg2 <- '
+## Welfare Support Factor ##
+welf_supp =~ gvslvol+gvslvue+gvhlthc
+welf_supp ~ agea + hinctnta + dfincac + gndr + eduyrs
+
+## Egalitarianism ##
+egual =~ gincdif+dfincac+smdfslv 
+'
+
+fit_ws_eg2 <- cfa(model_ws_eg2, # model formula
+                 data=ess_df)  # data frame
+
+
+model_ws_eg3 <- '
+## Welfare Support Factor ##
+welf_supp =~ gvslvol+gvslvue+gvhlthc
+welf_supp ~ agea +dfincac + gndr + eduyrs
+
+## Egalitarianism ##
+egual =~ gincdif+dfincac+smdfslv 
+'
+
+fit_ws_eg3 <- cfa(model_ws_eg3, # model formula
+                 data=ess_df)  # data frame
+
+model_ws_eg4 <- '
+## Welfare Support Factor ##
+welf_supp =~ gvslvol+gvslvue+gvhlthc
+welf_supp ~ agea  + gndr + eduyrs
+
+## Egalitarianism ##
+egual =~ gincdif+dfincac+smdfslv 
+'
+# 9 obs variable, 4 loadings for welf_supp&egual (since we restrict laoding=1 for the first variable of each latent variable), latent_var=2, covariance_latent=False, exogenous=3 (agea, gndr, eduyrs), then we can use these info to calculate the degree of freedom
+
+fit_ws_eg4 <- cfa(model_ws_eg4, # model formula
+                 data=ess_df)  # data frame
+
+# model1:gndr
+fitm_model_ws_eg1 <- fitMeasures(fit_ws_eg1, c("logl","AIC",  "BIC", "chisq","df","pvalue","cfi","tli", "rmsea"),  output = "matrix")
+
+# model4: agea  + gndr + eduyrs
+fitm_model_ws_eg4 <- fitMeasures(fit_ws_eg4, c("logl","AIC",  "BIC", "chisq","df","pvalue","cfi","tli", "rmsea"),  output = "matrix")
+
+# model3:agea +dfincac + gndr + eduyrs
+fitm_model_ws_eg3 <- fitMeasures(fit_ws_eg3, c("logl","AIC",  "BIC", "chisq","df","pvalue","cfi","tli", "rmsea"),  output = "matrix")
+
+# model2: agea + hinctnta + dfincac + gndr + eduyrs
+fitm_model_ws_eg2 <- fitMeasures(fit_ws_eg2, c("logl","AIC",  "BIC", "chisq","df","pvalue","cfi","tli", "rmsea"),  output = "matrix")
+
+fitm_model_ws_eg1
+fitm_model_ws_eg4
+fitm_model_ws_eg3
+fitm_model_ws_eg2
+
+
+```
+# comparing model with adding different covariances variable
+
+model1: gender,  aic=33303.601, CFI(0.937), TLI(0.906) and RMSEA(0.064) are good, meet the criterion.
+
+model4: agea  + gndr + eduyrs,aic=33261.924, CFI(0.889), TLI(0.848), RMSEA(0.067) lower than model1, and below the criterion.
+
+model3:agea +dfincac + gndr + eduyrs, aic=33254.005, CFI(0.895), TLI(0.849), RMSEA(0.067) lower than model1.
+
+model2: agea + hinctnta + dfincac + gndr + eduyrs, aic=29690.630, CFI(0.885), TLI(0.840), RMSEA(0.065) are lower than model1
+
+model2, model3, model4 all have lower aic than model1, CFI, TLI and RMSEA are similar to each other, but does not meet the cut-off criterion. Model2 has lowest aic, can be consider to use compare to other models.
+
+```{r}
+degres_of_freedom <- function(obs_var=obs_var, # n observed variables 
+loads=loads,     # n estimated factors loadings
+regression=regression, # n regression
+latent_var=latent_var, # n latent variables
+covariance_latent=TRUE, # covariance latent vars
+exogenous=exogenous){ # n exogenous 
+# next function returns n combination of 2 or more variables 
+# we use it to calculate the n covariance of the exogenous variables
+comb = function(n, x) {
+  if(n==0){return(0)} # if we have no exogenous variables return 0
+  if(n==1){return(0)} # if we have 1 exogenous variable return 0
+  else{
+  factorial(n) / factorial(n-x) / factorial(x)}
+}
+
+# 1. pieces of information (observed variables)
+info <- obs_var*(obs_var + 1)/2 
+
+#2. measurement part = n factor loadings + n residual variances. 
+measurement <- (loads) + obs_var
+
+#3. structural part = n regressions + n residual factor variance.
+structural <- ifelse(regression>0,0,regression) + latent_var
+
+# 4. exogenous variables = n variances + n covariances.
+# first, let's calculate the covariances 
+cov <- NA
+# lavaan removes by default the LV covariance when you include a regression
+# this code takes into account lavaan behaviour
+if(covariance_latent==TRUE){ 
+cov<-comb(latent_var, 2)}else{cov<-0}
+
+# second, let's get the n variances and n covariances for our exogenous vars.
+exogenous_var <- exogenous + comb(exogenous, 2)
+
+# finally, let's calculate the df
+df = info - (measurement + structural + exogenous_var+ cov)
+return(df)
+} 
+
+# for each model we have to find the number of obs, number of loadings, number of regression, number of latent variable, if we have covariance between latent variable, and exogenous variable
+df_model1 <- degres_of_freedom(obs_var=6,loads=4,regression=0,latent_var=2,covariance_latent=TRUE,exogenous=0)
+
+
+```
+
+# EX2
+
+```{r}
+model_mediation <- '
+## Welfare Support Factor ##
+welf_supp =~ gvslvol+gvslvue+gvhlthc
+
+## Egalitarianism ##
+egual =~gincdif+dfincac+smdfslv 
+
+## Direct effect(s) ##
+welf_supp ~ c1*agea+c2*eduyrs+c3*gndr+c4*hinctnta
+
+## Mediator ##
+# Path A
+egual ~ a1*agea
+egual ~ a2*eduyrs
+egual ~ a3*gndr
+egual ~ a4*hinctnta
+
+# Path B
+welf_supp ~ b1*egual
+
+## Indirect effect (a*b) ##
+ab_age := a1*b1
+ab_edu:=a2*b1
+ab_gndr:=a3*b1
+ab_hinc:=a4*b1
+
+## Total effect ##
+total_age:=c1+(a1*b1)
+total_edu:=c2+(a2*b1)
+total_gndr:=c3+(a3*b1)
+total_hinc:=c4+(a4*b1)
+'
+
+fit_mediation=cfa(model_mediation, data=ess_df)
+fitm_mediation_model <- fitMeasures(fit_mediation, c("logl","AIC",  "BIC", "chisq","df","pvalue","cfi","tli", "rmsea"),  output = "matrix")
+fitm_mediation_model
+
+
+# R^2
+round(inspect(fit_mediation,"r2"),3)
+# R^2 is the proportion of latent response explained by predictor
+
+
+# how to calculate the direct and indirect effect manually
+## Coefficients ## 
+a <- inspect(fit_mediation,"est")$beta["egual","agea"]
+b <- inspect(fit_mediation,"est")$beta["welf_supp","egual"]
+## Standard Errors ## 
+sigma_a <- inspect(fit_mediation,"se")$beta["egual","agea"]
+sigma_b <- inspect(fit_mediation,"se")$beta["welf_supp","egual"]
+## Manual calculation of indirect effect a x b ## 
+a * b
+
+## Manual calculation of the sigma a x b ## 
+sqrt(a^2*sigma_b^2 + b^2*sigma_a^2)
+
+## Manual calculation of the total effect (a x b) + c' ## 
+a * b + inspect(fit_mediation,"est")$beta["welf_supp","agea"]
+
+
+# calculate the direct and indirect effect by lavaan
+tidy_results <- table_results(fit_mediation,      columns = c("label", "est_sig", "se"),digits = 2,)
+
+tidy_results %>% filter(str_detect(label,"ab_age|total_age")) 
+```
+
